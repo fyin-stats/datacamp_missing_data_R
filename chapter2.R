@@ -120,3 +120,193 @@ head(tao_imp, 10)
 tao_imp %>% 
     select(air_temp, sea_surface_temp, air_temp_imp) %>%
     marginplot(delimiter = "imp")
+
+
+
+
+### Hot deck imputation
+### Dates back to 1950s, when data was stored on punched cards
+### US Census
+
+### Hot deck imputation: for each variable, replace every missing value with the last observed value
+### Hot deck refers to the deck of punched cards actually being processed
+
+### Cons:
+### Requires data to be MCAR
+### vanilla hot-deck can destroy relations between variables
+
+### Pros:
+### Fast
+### imputed data are not constant
+### simple tricks prevent breaking relations
+
+
+### 
+# hotdeck function from VIM package
+
+
+# imputing within domains, simple improvement, specify domain vars
+# sorting by correlated variables, specify ord_var
+
+# 
+# Load VIM package
+library(VIM)
+
+# Impute air_temp in tao with hot-deck imputation
+tao_imp <- hotdeck(tao, variable = "air_temp")
+
+# Check the number of missing values in each variable
+tao_imp %>% 
+    is.na() %>% 
+    colSums()
+
+# Draw a margin plot of air_temp vs sea_surface_temp
+tao_imp %>% 
+    select(air_temp, sea_surface_temp, air_temp_imp) %>% 
+    marginplot(delimiter = "imp")
+
+
+
+# Hot-deck tricks & tips I: imputing within domains
+# 
+# One trick that may help when hot-deck imputation breaks the relations between the variables is imputing within domains. What this means is that if the variable to be imputed is correlated with another, categorical variable, one can simply run hot-deck separately for each of its categories.
+# 
+# For instance, you might expect air temperature to depend on time, as we are seeing the average temperatures rising due to global warming. The time indicator you have available in the tao data is a categorical variable, year. Let's first check if the average air temperature is different in each of the two studied years and then run hot-deck within year domains. Finally, you will draw the margin plot again to assess the imputation performance.
+
+
+# 
+# Calculate mean air_temp per year
+tao %>% 
+    group_by(year) %>% 
+    summarize(average_air_temp = mean(air_temp, na.rm = TRUE))
+
+# Hot-deck-impute air_temp in tao by year domain
+tao_imp <- hotdeck(tao, variable = "air_temp", domain_var = "year")
+
+# Draw a margin plot of air_temp vs sea_surface_temp
+tao_imp %>% 
+    select(air_temp, sea_surface_temp, air_temp_imp) %>% 
+    marginplot(delimiter = "imp")
+
+
+
+## Hot-deck tricks & tips II: sorting by correlated variables
+
+# Another trick that can boost the performance of hot-deck imputation is sorting the data by variables correlated to the one we want to impute.
+# 
+# For instance, in all the margin plots you have been drawing recently, you have seen that air temperature is strongly correlated with sea surface temperature, which makes a lot of sense. You can exploit this knowledge to improve your hot-deck imputation. If you first order the data by sea_surface_temp, then every imputed air_temp value will come from a donor with a similar sea_surface_temp. Let's see how this will work!
+
+
+# 
+# Hot-deck-impute air_temp in tao ordering by sea_surface_temp
+tao_imp <- hotdeck(tao, variable = "air_temp", ord_var = "sea_surface_temp")
+
+# Draw a margin plot of air_temp vs sea_surface_temp
+tao_imp %>% 
+    select(air_temp, sea_surface_temp, air_temp_imp) %>% 
+    marginplot(delimiter = "imp")
+
+
+
+
+#############################################
+######## KNN imputation
+## k-nearest neighbors imputation
+## replace the missing values with aggregated values from k donors
+
+
+## distance measures
+## numerical: euclidean
+## factors: manhattan distance
+## categorical: hamming distance
+
+## Gower distance to combine them
+
+## kNN imputation in practice
+
+kNN()
+
+## 
+# weighting donors: put higher weight on the points that are closer
+# sorting variables by the number of missing values before running kNN
+# kNN algorithm loops over over variables, imputing them one by one
+# vars_by_NAs
+
+# 
+# Impute humidity using 30 neighbors
+tao_imp <- kNN(tao, k = 30, variable = "humidity")
+
+# Draw a margin plot of sea_surface_temp vs humidity
+tao_imp %>% 
+    select(sea_surface_temp, humidity, humidity_imp) %>% 
+    marginplot(delimiter = "imp", main = "k = 30")
+
+
+
+# 
+# Impute humidity using 15 neighbors
+tao_imp <- kNN(tao, k = 15, variable = "humidity")
+
+# Draw a margin plot of sea_surface_temp vs humidity
+tao_imp %>% 
+    select(sea_surface_temp, humidity, humidity_imp) %>% 
+    marginplot(delimiter = "imp", main = "k = 15")
+
+
+# 
+# Impute humidity using 5 neighbors
+tao_imp <- kNN(tao, k = 5, variable = "humidity")
+
+# Draw a margin plot of sea_surface_temp vs humidity
+tao_imp %>% 
+    select(sea_surface_temp, humidity, humidity_imp) %>% 
+    marginplot(delimiter = "imp", main = "k = 5")
+
+
+
+# kNN tricks & tips I: weighting donors
+# 
+# A variation of kNN imputation that is frequently applied uses the so-called distance-weighted aggregation. What this means is that when we aggregate the values from the neighbors to obtain a replacement for a missing value, we do so using the weighted mean and the weights are inverted distances from each neighbor. As a result, closer neighbors have more impact on the imputed value.
+# 
+# In this exercise, you will apply the distance-weighted aggregation while imputing the tao data. This will only require passing two additional arguments to the kNN() function. Let's try it out!
+
+
+# Load the VIM package
+library(VIM)
+
+# Impute humidity with kNN using distance-weighted mean
+tao_imp <- kNN(tao, 
+               k = 5, 
+               variable = "humidity", 
+               numFun = weighted.mean,
+               weightDist = TRUE)
+
+tao_imp %>% 
+    select(sea_surface_temp, humidity, humidity_imp) %>% 
+    marginplot(delimiter = "imp")
+
+
+# 
+# kNN tricks & tips II: sorting variables
+# 
+# As the k-Nearest Neighbors algorithm loops over the variables in the data to impute them, it computes distances between observations using other variables, some of which have already been imputed in the previous steps. This means that if the variables located earlier in the data have a lot of missing values, then the subsequent distance calculation is based on a lot of imputed values. This introduces noise to the distance calculation.
+# 
+# For this reason, it is a good practice to sort the variables increasingly by the number of missing values before performing kNN imputation. This way, each distance calculation is based on as much observed data and as little imputed data as possible.
+# 
+# Let's try this out on the tao data!
+
+# Get tao variable names sorted by number of NAs
+vars_by_NAs <- tao %>%
+    is.na() %>%
+    colSums() %>%
+    sort(decreasing = FALSE) %>% 
+    names()
+
+# Sort tao variables and feed it to kNN imputation
+tao_imp <- tao %>% 
+    select(vars_by_NAs) %>% 
+    kNN()
+
+tao_imp %>% 
+    select(sea_surface_temp, humidity, humidity_imp) %>% 
+    marginplot(delimiter = "imp")
