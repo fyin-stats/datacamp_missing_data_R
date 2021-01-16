@@ -14,7 +14,7 @@ ipak <- function(pkg){
 packages <- c( "ggplot2", "sparklyr","foreach",
                "doParallel", "dplyr",
                "xtable", "data.table",  "DescTools", 
-               "ggplot2", "devtools", "stringr", "stringi", "NHANES", "VIM", "simputation")
+               "ggplot2", "devtools", "stringr", "stringi", "NHANES", "VIM", "simputation", "missForest")
 ipak(packages)
 
 
@@ -132,3 +132,155 @@ for (i in 1:5) {
     diff_air_temp <- c(diff_air_temp, mapc(prev_iter$air_temp, tao_imp$air_temp))
     diff_humidity <- c(diff_humidity, mapc(prev_iter$humidity, tao_imp$humidity))
 }
+
+
+#######
+#######
+# Replicating data variability
+#######
+#######
+
+# mean imputation: no variability in imputed data
+# we would like the imputation to replicate the variability of observed data
+# what is a prediction, conditional distribution of the response variable
+
+# Instead, we can draw from the estimated distribution
+# 
+
+# logistic regression imputation
+# use rbinom to draw random samples
+# 
+
+# Logistic regression imputation
+# 
+# A popular choice for imputing binary variables is logistic regression. Unfortunately, there is no function similar to impute_lm() that would do it. That's why you'll write such a function yourself!
+#     
+#     Let's call the function impute_logreg(). Its first argument will be a data frame df, whose missing values have been initialized and only containing missing values in the column to be imputed. The second argument will be a formula for the logistic regression model.
+# 
+# The function will do the following:
+# 
+#     Keep the locations of missing values.
+#     Build the model.
+#     Make predictions.
+#     Replace missing values with predictions.
+# 
+# Don't worry about the line creating imp_var - this is just a way to extract the name of the column to impute from the formula. Let's do some functional programming!
+
+
+impute_logreg <- function(df, formula) {
+    # Extract name of response variable
+    imp_var <- as.character(formula[2])
+    # Save locations where the response is missing
+    missing_imp_var <- is.na(df[imp_var])
+    # Fit logistic regression mode
+    logreg_model <- glm(formula, data = df, family = binomial)
+    # Predict the response
+    preds <- predict(logreg_model, type = "response")
+    # Sample the predictions from binomial distribution
+    preds <- rbinom(length(preds), size = 1, prob = preds)
+    # Impute missing values with predictions
+    df[missing_imp_var, imp_var] <- preds[missing_imp_var]
+    return(df)
+}
+
+
+################
+## 
+# Model-based imputation with multiple variable types
+# 
+# Great job on writing the function to implement logistic regression imputation with drawing from conditional distribution. That's pretty advanced statistics you have coded! In this exercise, you will combine what you learned so far about model-based imputation to impute different types of variables in the tao data.
+# 
+# Your task is to iterate over variables just like you have done in the previous chapter and impute two variables:
+# 
+#     is_hot, a new binary variable that was created out of air_temp, which is 1 if air_temp is at or above 26 degrees and is 0 otherwise;
+#     humidity, a continuous variable you are already familiar with.
+# 
+# You will have to use the linear regression function you have learned before, as well as your own function for logistic regression. Let's get to it!
+
+
+
+# Initialize missing values with hot-deck
+tao_imp <- hotdeck(tao)
+
+# Create boolean masks for where is_hota and humidity are missing
+missing_is_hot <- tao_imp$is_hot_imp
+missing_humidity <- tao_imp$humidity_imp
+
+for (i in 1:3) {
+    # Set is_hot to NA in places where it was originally missing and re-impute it
+    tao_imp$is_hot[missing_is_hot] <- NA
+    tao_imp <- impute_logreg(tao_imp, is_hot ~ sea_surface_temp)
+    # Set humidity to NA in places where it was originally missing and re-impute it
+    tao_imp$humidity[missing_humidity] <- NA
+    tao_imp <- impute_lm(tao_imp, humidity ~ sea_surface_temp + air_temp)
+}
+
+
+
+
+
+########### Tree-based models for imputation
+########### 
+########### nonparametric approach: no assumptions on relationships between variables
+########### can pick up complex non-linear patterns
+########### often better predictive performance compared to simple statistical models
+###########
+
+# missForest package: with randomForest under the hood
+# results from all trees are aggregated
+# 
+
+# missForest algorithm
+# 1, make an initial guess for missing values with mean imputation
+# 2, sort the variables in ascending order by the amount of missing values
+# 3, for each variable x, 
+# fit a random forest to the observed of x (using other variables as predictors)
+# use it to predict the missing part of x
+
+# imputation error
+# out-of-bag imputation error estimate
+# continuous variables: normalized root mean squared error (NRMSE) for continuous variables
+# proportion of falsely classified entries (PFC) for categorical varaiables
+
+# in both cases, good performance leads to a value close to 0 and values around 1 indicate a poor results
+# OOBerror, one error 
+# variablewise = TRUE 
+
+# Speed accuracy trade off
+# ntree: linear reduction
+# mtry: more reduction
+
+# default : 100 trees
+# 
+# Load the missForest package
+library(missForest)
+
+# Impute biopics data using missForest
+imp_res <- missForest(biopics)
+
+# Extract imputed data and check for missing values
+imp_data <- imp_res$ximp
+print(sum(is.na(imp_data)))
+
+# Extract and print imputation errors
+imp_err <- imp_res$OOBerror
+print(imp_err)
+
+
+
+# 
+# Impute biopics data with missForest computing per-variable errors
+imp_res <- missForest(biopics, variablewise = TRUE)
+
+# Extract and print imputation errors
+per_variable_errors <- imp_res$OOBerror
+print(per_variable_errors)
+
+# Rename errors' columns to include variable names
+names(per_variable_errors) <- paste(names(biopics), 
+                                    names(per_variable_errors),
+                                    sep = "_")
+
+# Print the renamed errors
+print(per_variable_errors)
+
