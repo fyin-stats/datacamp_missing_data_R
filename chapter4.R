@@ -264,10 +264,6 @@ africa %>%
     select(country, trade) %>%
     spineMiss()
 
-
-
-
-
 #########################################
 ### 
 # Load mice
